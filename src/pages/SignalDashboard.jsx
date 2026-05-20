@@ -48,7 +48,7 @@ export default function SignalDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch Available Trading Pairs from Render safely
+  // Fetch Available Trading Pairs from Render Safely
   useEffect(() => {
     fetch(`${BACKEND_URL}/api/assets`)
       .then((res) => {
@@ -58,7 +58,14 @@ export default function SignalDashboard() {
       .then((data) => {
         if (data && data.assets && Array.isArray(data.assets) && data.assets.length > 0) {
           setAssets(data.assets);
-          setSelectedAsset(data.assets[0]); // Default safely
+          
+          // Fallback parsing logic to check first element type
+          const firstAsset = data.assets[0];
+          if (typeof firstAsset === 'object' && firstAsset !== null) {
+            setSelectedAsset(firstAsset.symbol || '');
+          } else {
+            setSelectedAsset(firstAsset);
+          }
         } else {
           // Fallback array list so the app NEVER crashes even if the backend is waking up
           const fallbackAssets = ["BTC/USD", "ETH/USD", "EUR/USD"];
@@ -68,7 +75,6 @@ export default function SignalDashboard() {
       })
       .catch((err) => {
         console.error("Error fetching assets from cloud backend:", err);
-        // Fallback safety matrix trigger
         const fallbackAssets = ["BTC/USD", "ETH/USD", "EUR/USD"];
         setAssets(fallbackAssets);
         setSelectedAsset(fallbackAssets[0]);
@@ -88,13 +94,13 @@ export default function SignalDashboard() {
       const data = await response.json();
       setSignal(data);
       
-      // Add entry to running history log panel
+      // Add entry to running history log panel safely parsing text properties
       setHistory(prev => [
         {
           time: new Date().toTimeString().split(' ')[0],
-          asset: selectedAsset,
+          asset: typeof selectedAsset === 'object' ? selectedAsset.symbol : selectedAsset,
           timeframe: timeframe,
-          direction: data.direction,
+          direction: data.direction || 'UNKNOWN',
           result: 'Pending'
         },
         ...prev
@@ -157,9 +163,14 @@ export default function SignalDashboard() {
                 onChange={(e) => setSelectedAsset(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm font-medium text-slate-200 appearance-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all cursor-pointer"
               >
-                {assets.map((asset) => (
-                  <option key={asset} value={asset}>{asset}</option>
-                ))}
+                {assets.map((asset, index) => {
+                  // Guard rails against Error #31: string vs object check
+                  const assetValue = typeof asset === 'object' && asset !== null ? asset.symbol : asset;
+                  const assetDisplay = typeof asset === 'object' && asset !== null ? `${asset.name} (${asset.symbol})` : asset;
+                  return (
+                    <option key={assetValue || index} value={assetValue}>{assetDisplay}</option>
+                  );
+                })}
               </select>
               <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-500 pointer-events-none" />
             </div>
@@ -224,7 +235,7 @@ export default function SignalDashboard() {
                   ) : (
                     <TrendingDown className="h-6 w-6 stroke-[2.5] animate-bounce" />
                   )}
-                  {signal.asset} — {signal.direction} EXECUTIVE ORDER
+                  {typeof signal.asset === 'object' ? signal.asset.symbol : signal.asset} — {signal.direction} EXECUTIVE ORDER
                 </div>
 
                 {/* ALGORITHM DATA MATRIX */}
