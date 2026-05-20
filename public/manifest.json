@@ -1,0 +1,23 @@
+{
+  "short_name": "QX Signal",
+  "name": "QX Signal - Quotex/OTC Engine",
+  "icons": [
+    {
+      "src": "https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4",
+      "sizes": "120x120",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://avatars.githubusercontent.com/in/1201222?s=512&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#050505",
+  "theme_color": "#0A0A0A",
+  "display": "standalone",
+  "orientation": "portrait-primary"
+}
