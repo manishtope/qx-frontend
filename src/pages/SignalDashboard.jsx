@@ -1,279 +1,305 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  TrendingUp, TrendingDown, Clock, Activity, 
-  BarChart2, ShieldAlert, Layers, RefreshCw, ChevronDown 
+import {
+  TrendingUp, TrendingDown, Clock, Activity,
+  BarChart2, ShieldAlert, Layers, RefreshCw, ChevronDown
 } from 'lucide-react';
 
 export default function SignalDashboard() {
   const [assets, setAssets] = useState([]);
   const [selectedAsset, setSelectedAsset] = useState('');
-  const [timeframe, setTimeframe] = useState('1m');
-  const [timezone, setTimezone] = useState('IST');
-  const [loading, setLoading] = useState(false);
+  const [timeframe, setTimeframe] = useState('5m');
   const [signal, setSignal] = useState(null);
-  const [ticker, setTicker] = useState([]);
-
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [candleTimeLeft, setCandleTimeLeft] = useState('');
   const [nextCandleTime, setNextCandleTime] = useState('');
   const [headerClock, setHeaderClock] = useState('');
 
-  useEffect(() => {
-    fetch('http://127.0.0.1:8001/api/assets')
-      .then(res => res.json())
-      .then(data => {
-        if (data.assets && data.assets.length > 0) {
-          setAssets(data.assets);
-          setSelectedAsset(data.assets[0].symbol);
-        }
-      })
-      .catch(err => console.error("Error pulling asset registry:", err));
+  // Live cloud backend server URL running on Render
+  const BACKEND_URL = "https://qx-backend.onrender.com";
 
-    const fetchTicker = () => {
-      fetch('http://127.0.0.1:8001/api/ticker')
-        .then(res => res.json())
-        .then(data => { if (data.ticker) setTicker(data.ticker); })
-        .catch(err => console.error("Error pulling ticker feed:", err));
+  // Global Header Clock Sync
+  useEffect(() => {
+    const updateClocks = () => {
+      const now = new Date();
+      
+      // Update running header clock (HH:MM:SS)
+      setHeaderClock(now.toTimeString().split(' ')[0]);
+
+      // Calculate time left for standard candle closures
+      const secs = now.getSeconds();
+      const mins = now.getMinutes();
+      const remMins = 4 - (mins % 5);
+      const remSecs = 60 - secs;
+      
+      setCandleTimeLeft(
+        `${String(remMins).padStart(2, '0')}:${String(remSecs === 60 ? 0 : remSecs).padStart(2, '0')}`
+      );
+
+      // Estimate next static candle arrival block
+      const nextCandle = new Date(now.getTime() + (remMins * 60 + remSecs) * 1000);
+      setNextCandleTime(
+        nextCandle.toTimeString().split(' ')[0].substring(0, 5)
+      );
     };
 
-    fetchTicker();
-    const tickerInterval = setInterval(fetchTicker, 5000);
-    return () => clearInterval(tickerInterval);
+    updateClocks();
+    const interval = setInterval(updateClocks, 1000);
+    return () => clearInterval(interval);
   }, []);
 
+  // Fetch Available Trading Pairs from Render
   useEffect(() => {
-    const updateTimers = () => {
-      const now = new Date();
-      let tzOffsetMs = 0;
-      if (timezone === 'IST') tzOffsetMs = 5.5 * 60 * 60 * 1000;
-      if (timezone === 'EST') tzOffsetMs = -5 * 60 * 60 * 1000;
-      
-      const tzTime = new Date(now.getTime() + tzOffsetMs);
-      setHeaderClock(`${String(tzTime.getUTCHours()).padStart(2, '0')}:${String(tzTime.getUTCMinutes()).padStart(2, '0')}:${String(tzTime.getUTCSeconds()).padStart(2, '0')}`);
+    fetch(`${BACKEND_URL}/api/assets`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.assets && data.assets.length > 0) {
+          setAssets(data.assets);
+          setSelectedAsset(data.assets[0]); // Default to first pair
+        }
+      })
+      .catch((err) => console.error("Error fetching assets from cloud backend:", err));
+  }, []);
 
-      let periodSeconds = 60;
-      if (timeframe === '5m') periodSeconds = 300;
-      if (timeframe === '15m') periodSeconds = 900;
-
-      const currentEpochSec = Math.floor(now.getTime() / 1000);
-      const secondsPassed = currentEpochSec % periodSeconds;
-      const totalSecondsRemaining = periodSeconds - secondsPassed;
-
-      setCandleTimeLeft(`${Math.floor(totalSecondsRemaining / 60)}:${String(totalSecondsRemaining % 60).padStart(2, '0')}`);
-
-      const nextCandleDate = new Date(((currentEpochSec + totalSecondsRemaining + periodSeconds) * 1000) + tzOffsetMs);
-      setNextCandleTime(`${String(nextCandleDate.getUTCHours()).padStart(2, '0')}:${String(nextCandleDate.getUTCMinutes()).padStart(2, '0')}:${String(nextCandleDate.getUTCSeconds()).padStart(2, '0')}`);
-    };
-
-    updateTimers();
-    const interval = setInterval(updateTimers, 1000);
-    return () => clearInterval(interval);
-  }, [timeframe, timezone]);
-
-  const handleGenerateSignal = async () => {
+  // Generate Trading Signal Function
+  const generateSignal = async () => {
     if (!selectedAsset) return;
     setLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:8001/api/signal/generate', {
+      const response = await fetch(`${BACKEND_URL}/api/generate-signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: selectedAsset, timeframe, tz: timezone })
+        body: JSON.stringify({ asset: selectedAsset, timeframe: timeframe })
       });
       const data = await response.json();
       setSignal(data);
-    } catch (err) {
-      console.error("Signal API failure:", err);
+      
+      // Add entry to running history log panel
+      setHistory(prev => [
+        {
+          time: new Date().toTimeString().split(' ')[0],
+          asset: selectedAsset,
+          timeframe: timeframe,
+          direction: data.direction,
+          result: 'Pending'
+        },
+        ...prev
+      ]);
+    } catch (error) {
+      console.error("Cloud signaling runtime error:", error);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#F5F5F5] font-sans antialiased grid-bg">
-      <div className="w-full tape-strip py-1.5 overflow-hidden border-b border-zinc-900">
-        <div className="flex whitespace-nowrap animate-marquee gap-8 text-[11px] font-mono text-zinc-400">
-          {ticker.map((t, idx) => (
-            <div key={idx} className="inline-flex items-center gap-1.5">
-              <span>{t.name}</span>
-              <span className="text-zinc-200">{t.price}</span>
-              <span className={t.change >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
-                {t.change >= 0 ? '▲' : '▼'} {Math.abs(t.change)}%
-              </span>
-            </div>
-          ))}
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500/30">
+      {/* HEADER BAR */}
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <Activity className="h-5 w-5 text-slate-950 stroke-[2.5]" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+              QX QUANTUM ENGINE
+            </h1>
+            <p className="text-xs text-emerald-400/80 font-mono tracking-wider flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              CLOUD ENGINE SYNCHRONIZED
+            </p>
+          </div>
         </div>
-      </div>
 
-      <div className="max-w-[1400px] mx-auto p-4 lg:p-6 space-y-6">
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-[#0A0A0A] border border-zinc-900 rounded-xl p-4 gap-4 shadow-xl">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-emerald-400">
-              <Activity size={22} className="animate-pulse" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black font-mono tracking-tighter text-white">QX SIGNAL ENGINE</h1>
-              <p className="text-[10px] font-mono text-zinc-500 tracking-wider">QUOTEX / OTC TECHNICAL CALCULATOR</p>
-            </div>
+        {/* METRICS ROW */}
+        <div className="flex items-center gap-8 font-mono text-sm">
+          <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
+            <span className="text-slate-500 text-xs tracking-uppercase">Live Time</span>
+            <span className="text-slate-200 font-bold tracking-wide">{headerClock || "00:00:00"}</span>
+          </div>
+          <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
+            <span className="text-slate-500 text-xs tracking-uppercase">Candle Close</span>
+            <span className="text-amber-400 font-bold tracking-wide animate-pulse">{candleTimeLeft || "00:00"}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* DASHBOARD CONTROL GRID */}
+      <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* ACTION SELECTORS (LEFT PANEL) */}
+        <section className="lg:col-span-1 bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col gap-6 shadow-xl relative overflow-hidden">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight mb-1 text-slate-200">Execution Controls</h2>
+            <p className="text-xs text-slate-400">Configure parameters for direct signal calculation routing.</p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-6 bg-zinc-950/40 p-2 rounded-lg border border-zinc-900">
-            <div>
-              <label className="block text-[9px] font-mono uppercase tracking-widest text-zinc-500 mb-1">Timezone Context</label>
-              <div className="relative">
-                <select 
-                  value={timezone} 
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className="appearance-none bg-[#050505] border border-zinc-800 text-zinc-300 font-mono text-xs rounded-md pl-2 pr-7 py-1 focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="IST">IST (India Local)</option>
-                  <option value="UTC">UTC (Universal)</option>
-                  <option value="EST">EST (New York)</option>
-                </select>
-                <ChevronDown size={12} className="absolute right-2 top-2 text-zinc-500 pointer-events-none" />
-              </div>
-            </div>
-            <div className="text-right border-l border-zinc-800 pl-4">
-              <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500 block">{timezone} Digital Time</span>
-              <span className="font-mono text-lg font-bold text-white tracking-wide">{headerClock || '00:00:00'}</span>
-            </div>
-          </div>
-        </header>
-
-        <main className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <section className="lg:col-span-5 space-y-6">
-            <div className="bg-[#0A0A0A] border border-zinc-900 rounded-xl p-5 space-y-5 shadow-lg">
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-400 mb-2">Asset / Symbol Select</label>
-                <div className="relative">
-                  <select
-                    value={selectedAsset}
-                    onChange={(e) => setSelectedAsset(e.target.value)}
-                    className="w-full appearance-none bg-[#050505] border border-zinc-800 text-zinc-100 font-mono text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-emerald-500"
-                  >
-                    {assets.map((a) => (
-                      <option key={a.symbol} value={a.symbol}>{a.name} ({a.category.toUpperCase()})</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} className="absolute right-3 top-3.5 text-zinc-400 pointer-events-none" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-wider text-zinc-400 mb-2">Expiry Framework</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {['1m', '5m', '15m'].map((tf) => (
-                    <button
-                      key={tf}
-                      onClick={() => setTimeframe(tf)}
-                      className={`py-2 text-xs font-mono font-bold rounded-lg border transition-all ${
-                        timeframe === tf ? 'bg-white text-black border-white font-black' : 'bg-[#050505] text-zinc-400 border-zinc-800'
-                      }`}
-                    >
-                      {tf.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 p-3 bg-zinc-950 rounded-lg border border-zinc-900 font-mono">
-                <div className="p-2 border-r border-zinc-800">
-                  <span className="text-[9px] text-zinc-500 block uppercase tracking-wider">Active Candle Ends</span>
-                  <span className={`text-xl font-black ${
-                    candleTimeLeft.startsWith('0:') && parseInt(candleTimeLeft.split(':')[1]) <= 10 ? 'text-rose-500 animate-pulse' : 'text-amber-400'
-                  }`}>
-                    {candleTimeLeft || '0:00'}
-                  </span>
-                </div>
-                <div className="p-2 pl-4">
-                  <span className="text-[9px] text-zinc-500 block uppercase tracking-wider">Next Expiry Target</span>
-                  <span className="text-xl font-bold text-sky-400">{nextCandleTime || '00:00:00'}</span>
-                </div>
-              </div>
-
-              <button
-                onClick={handleGenerateSignal}
-                disabled={loading || !selectedAsset}
-                className={`w-full py-3.5 rounded-lg font-mono font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
-                  loading ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-emerald-500 text-black hover:bg-emerald-400'
-                }`}
+          {/* ASSET SELECTOR */}
+          <div className="flex flex-col gap-2 relative">
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Target Asset Pair</label>
+            <div className="relative">
+              <select 
+                value={selectedAsset} 
+                onChange={(e) => setSelectedAsset(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm font-medium text-slate-200 appearance-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all cursor-pointer"
               >
-                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Clock size={16} />}
-                <span>{loading ? "Analyzing Indicators..." : "Generate Signal"}</span>
-              </button>
+                {assets.map((asset) => (
+                  <option key={asset} value={asset}>{asset}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-500 pointer-events-none" />
             </div>
-          </section>
+          </div>
 
-          <section className="lg:col-span-7 space-y-6">
+          {/* TIMEFRAME SELECTOR */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Analysis Expiry Period</label>
+            <div className="grid grid-cols-3 gap-2">
+              {['1m', '5m', '15m'].map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`py-2.5 rounded-xl font-mono font-bold text-xs border transition-all ${
+                    timeframe === tf 
+                      ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-500/5 border-emerald-500/50 text-emerald-400 shadow-lg shadow-emerald-500/5' 
+                      : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  {tf.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* EXECUTE ACTION BUTTON */}
+          <button
+            onClick={generateSignal}
+            disabled={loading || !selectedAsset}
+            className="w-full mt-auto bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-sm tracking-wide py-4 px-6 rounded-xl hover:opacity-95 active:scale-[0.99] disabled:opacity-40 disabled:pointer-events-none transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10"
+          >
+            {loading ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin stroke-[2.5]" />
+                CALCULATING PROBABILITIES...
+              </>
+            ) : (
+              <>
+                <BarChart2 className="h-4 w-4 stroke-[2.5]" />
+                GENERATE INSTANT SIGNAL
+              </>
+            )}
+          </button>
+        </section>
+
+        {/* MAIN RESULTS MONITOR (CENTER/RIGHT PANEL) */}
+        <section className="lg:col-span-2 flex flex-col gap-6">
+          
+          {/* LOGIC INTERFACE SCREEN */}
+          <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[340px] text-center shadow-xl relative overflow-hidden">
             {signal ? (
-              <div className="bg-[#0A0A0A] border border-zinc-900 rounded-xl p-5 space-y-6 shadow-xl">
-                <div className={`p-4 rounded-xl border flex justify-between items-center ${
-                  signal.direction === 'UP' ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-400' : 'bg-rose-950/30 border-rose-500/30 text-rose-400'
+              <div className="w-full flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-200">
+                
+                {/* DYNAMIC DIRECTION BADGE */}
+                <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl border font-bold text-lg tracking-wide shadow-md ${
+                  signal.direction === 'CALL' 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-emerald-500/5' 
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400 shadow-rose-500/5'
                 }`}>
-                  <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-xl border ${signal.direction === 'UP' ? 'bg-emerald-500 text-black' : 'bg-rose-500 text-black'}`}>
-                      {signal.direction === 'UP' ? <TrendingUp size={24} strokeWidth={3} /> : <TrendingDown size={24} strokeWidth={3} />}
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-mono block opacity-70">{signal.name} • {signal.timeframe.toUpperCase()} Framework</span>
-                      <h2 className="text-2xl font-black font-mono">{signal.direction === 'UP' ? 'CALL / UP OPTION' : 'PUT / DOWN OPTION'}</h2>
-                    </div>
+                  {signal.direction === 'CALL' ? (
+                    <TrendingUp className="h-6 w-6 stroke-[2.5] animate-bounce" />
+                  ) : (
+                    <TrendingDown className="h-6 w-6 stroke-[2.5] animate-bounce" />
+                  )}
+                  {signal.asset} — {signal.direction} EXECUTIVE ORDER
+                </div>
+
+                {/* ALGORITHM DATA MATRIX */}
+                <div className="grid grid-cols-2 gap-4 w-full max-w-md mt-2 font-mono text-xs">
+                  <div className="bg-slate-950/60 border border-slate-800 px-4 py-3 rounded-xl flex flex-col gap-1 text-left">
+                    <span className="text-slate-500 uppercase tracking-wider font-sans">Confidence Level</span>
+                    <span className="text-slate-200 font-bold text-sm">{signal.confidence}% Accuracy Rating</span>
                   </div>
-                  <div className="text-right font-mono">
-                    <span className="text-[10px] block opacity-70">Confidence Metrics</span>
-                    <span className="text-2xl font-black">{signal.confidence}%</span>
+                  <div className="bg-slate-950/60 border border-slate-800 px-4 py-3 rounded-xl flex flex-col gap-1 text-left">
+                    <span className="text-slate-500 uppercase tracking-wider font-sans">Execution Window</span>
+                    <span className="text-amber-400 font-bold text-sm">Open until {nextCandleTime || "00:00"}</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 font-mono">
-                  <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-900 text-center">
-                    <span className="text-[10px] text-zinc-500 block uppercase mb-1">Target Entry Price</span>
-                    <span className="text-xl font-bold text-white">{signal.entry_price}</span>
-                  </div>
-                  <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-900 text-center">
-                    <span className="text-[10px] text-zinc-500 block uppercase mb-1">Signal Expiry Target</span>
-                    <span className="text-xl font-bold text-zinc-200">{signal.expiry_at}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <h3 className="text-xs font-mono uppercase text-zinc-400 flex items-center gap-1.5"><Layers size={14} /> Matrix Indicator Convergences</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-                    <div className="bg-zinc-950 p-2.5 rounded border border-zinc-900">
-                      <span className="text-zinc-500 block text-[10px]">RSI (14)</span>
-                      <span className="text-white block font-bold">{signal.indicators.rsi}</span>
-                      <span className="text-[9px] text-zinc-400">{signal.indicators.rsi_status}</span>
-                    </div>
-                    <div className="bg-zinc-950 p-2.5 rounded border border-zinc-900">
-                      <span className="text-zinc-500 block text-[10px]">MACD Hist</span>
-                      <span className="text-white block font-bold">{signal.indicators.macd_hist}</span>
-                      <span className="text-[9px] text-zinc-400">{signal.indicators.macd_status}</span>
-                    </div>
-                    <div className="bg-zinc-950 p-2.5 rounded border border-zinc-900">
-                      <span className="text-zinc-500 block text-[10px]">EMA Cross</span>
-                      <span className="text-white block font-bold">9 / 21 Period</span>
-                      <span className="text-[9px] text-zinc-400">{signal.indicators.ema_status}</span>
-                    </div>
-                    <div className="bg-zinc-950 p-2.5 rounded border border-zinc-900">
-                      <span className="text-zinc-500 block text-[10px]">Bollinger</span>
-                      <span className="text-white block font-bold">20 StdDev</span>
-                      <span className="text-[9px] text-zinc-400">{signal.indicators.bb_status}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-900 space-y-1.5">
-                  <span className="text-[10px] font-mono text-zinc-500 block uppercase flex items-center gap-1"><BarChart2 size={12} /> Execution Rationale Notes</span>
-                  <p className="text-xs text-zinc-300 leading-relaxed font-mono">{signal.reasoning}</p>
+                {/* AI EXPLANATION FIELD */}
+                <div className="w-full max-w-md bg-slate-950 border border-slate-800/60 rounded-xl p-4 text-left shadow-inner">
+                  <span className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest font-mono flex items-center gap-1.5 mb-2">
+                    <Layers className="h-3 w-3" /> Core Indicator Rationale
+                  </span>
+                  <p className="text-xs text-slate-300 leading-relaxed font-sans">{signal.reasoning}</p>
                 </div>
               </div>
             ) : (
-              <div className="h-full min-h-[380px] bg-[#0A0A0A] border border-zinc-900 rounded-xl flex flex-col items-center justify-center text-center p-6 text-zinc-500 shadow-inner font-mono">
-                <ShieldAlert size={36} className="mb-3 text-zinc-600" />
-                <p className="text-sm tracking-wide">AWAITING SYSTEM INITIALIZATION TRIGGER</p>
+              <div className="flex flex-col items-center gap-4 max-w-sm">
+                <div className="h-14 w-14 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-600 shadow-inner">
+                  <ShieldAlert className="h-6 w-6 stroke-[1.5]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-300 mb-1">Telemetry Monitor Clear</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Select your operational trading pair asset on the sidebar control deck and prompt calculations to evaluate live indicators.
+                  </p>
+                </div>
               </div>
             )}
-          </section>
-        </main>
-      </div>
+          </div>
+
+          {/* RUNNING SESSION LOGGER HISTORY PANEL */}
+          <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col gap-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
+              <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <Clock className="h-4 w-4 text-slate-500" /> Recent Cloud Telemetry Sessions
+              </h3>
+              <span className="text-[10px] font-mono text-slate-500 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded-md">
+                {history.length} SAVED REQUESTS
+              </span>
+            </div>
+
+            <div className="overflow-x-auto max-h-[180px] overflow-y-auto custom-scrollbar">
+              {history.length > 0 ? (
+                <table className="w-full text-left border-collapse font-mono text-xs">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-slate-800/40">
+                      <th className="pb-2 font-sans font-semibold">Timestamp</th>
+                      <th className="pb-2 font-sans font-semibold">Asset Pair</th>
+                      <th className="pb-2 font-sans font-semibold">Expiry</th>
+                      <th className="pb-2 font-sans font-semibold">Direction</th>
+                      <th className="pb-2 font-sans font-semibold text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/30">
+                    {history.map((item, index) => (
+                      <tr key={index} className="text-slate-300 hover:bg-slate-950/30 transition-colors">
+                        <td className="py-2.5 text-slate-500">{item.time}</td>
+                        <td className="py-2.5 font-bold text-slate-200">{item.asset}</td>
+                        <td className="py-2.5 text-slate-400">{item.timeframe}</td>
+                        <td className="py-2.5">
+                          <span className={`font-bold ${item.direction === 'CALL' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {item.direction}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <span className="text-amber-400 bg-amber-400/5 border border-amber-400/20 px-2 py-0.5 rounded text-[10px] font-sans">
+                            {item.result}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="text-xs text-slate-600 text-center py-6 font-sans italic">
+                  No active queries sent to the cloud cluster in this viewport session.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
