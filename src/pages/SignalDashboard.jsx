@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   TrendingUp, TrendingDown, Clock, Activity,
-  BarChart2, ShieldAlert, Layers, RefreshCw, ChevronDown
+  BarChart2, ShieldAlert, Layers, RefreshCw, ChevronDown, Globe
 } from 'lucide-react';
 
 export default function SignalDashboard() {
@@ -11,42 +11,71 @@ export default function SignalDashboard() {
   const [signal, setSignal] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [candleTimeLeft, setCandleTimeLeft] = useState('');
-  const [nextCandleTime, setNextCandleTime] = useState('');
+  
+  // Clocks & Timer States
   const [headerClock, setHeaderClock] = useState('');
+  const [candleTimeLeft, setCandleTimeLeft] = useState('');
+  const [tenSecondTimer, setTenSecondTimer] = useState(10);
+  const [selectedTimezone, setSelectedTimezone] = useState('Asia/Kolkata'); // Default to IST
 
-  // Live cloud backend server URL running on Render
   const BACKEND_URL = "https://qx-backend.onrender.com";
 
-  // Global Header Clock Sync
+  // Timezones array matching your original application options
+  const TIMEZONES = [
+    { value: 'Asia/Kolkata', label: 'IST (UTC+5:30)' },
+    { value: 'UTC', label: 'UTC (Greenwich)' },
+    { value: 'America/New_York', label: 'EST / EDT (New York)' },
+    { value: 'Europe/London', label: 'BST / GMT (London)' },
+    { value: 'Asia/Dubai', label: 'GST (Dubai)' }
+  ];
+
+  // Global Sync Clocks & 10s Timer Loop
   useEffect(() => {
     const updateClocks = () => {
       const now = new Date();
       
-      // Update running header clock (HH:MM:SS)
-      setHeaderClock(now.toTimeString().split(' ')[0]);
+      // 1. Live Running Clock formatted dynamically by selected timezone
+      try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: selectedTimezone,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+        setHeaderClock(formatter.format(now));
+      } catch (e) {
+        setHeaderClock(now.toTimeString().split(' ')[0]);
+      }
 
-      // Calculate time left for standard candle closures
+      // 2. Standard Expiry Candlestick block countdown (5m frame)
       const secs = now.getSeconds();
       const mins = now.getMinutes();
       const remMins = 4 - (mins % 5);
       const remSecs = 60 - secs;
-      
       setCandleTimeLeft(
         `${String(remMins).padStart(2, '0')}:${String(remSecs === 60 ? 0 : remSecs).padStart(2, '0')}`
       );
-
-      // Estimate next static candle arrival block
-      const nextCandle = new Date(now.getTime() + (remMins * 60 + remSecs) * 1000);
-      setNextCandleTime(
-        nextCandle.toTimeString().split(' ')[0].substring(0, 5)
-      );
     };
 
+    // 3. Independent 10s Candle Block Timer Loop
+    const tenSecondInterval = setInterval(() => {
+      setTenSecondTimer((prev) => {
+        if (prev <= 1) {
+          return 10; // Auto reset right at zero boundary
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
     updateClocks();
-    const interval = setInterval(updateClocks, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    const clockInterval = setInterval(updateClocks, 1000);
+
+    return () => {
+      clearInterval(clockInterval);
+      clearInterval(tenSecondInterval);
+    };
+  }, [selectedTimezone]);
 
   // Fetch Available Trading Pairs from Render Safely
   useEffect(() => {
@@ -58,24 +87,17 @@ export default function SignalDashboard() {
       .then((data) => {
         if (data && data.assets && Array.isArray(data.assets) && data.assets.length > 0) {
           setAssets(data.assets);
-          
-          // Fallback parsing logic to check first element type
           const firstAsset = data.assets[0];
-          if (typeof firstAsset === 'object' && firstAsset !== null) {
-            setSelectedAsset(firstAsset.symbol || '');
-          } else {
-            setSelectedAsset(firstAsset);
-          }
+          setSelectedAsset(typeof firstAsset === 'object' ? firstAsset.symbol : firstAsset);
         } else {
-          // Fallback array list so the app NEVER crashes even if the backend is waking up
-          const fallbackAssets = ["BTC/USD", "ETH/USD", "EUR/USD"];
+          const fallbackAssets = ["EURUSD", "GBPUSD", "BTCUSD"];
           setAssets(fallbackAssets);
           setSelectedAsset(fallbackAssets[0]);
         }
       })
       .catch((err) => {
-        console.error("Error fetching assets from cloud backend:", err);
-        const fallbackAssets = ["BTC/USD", "ETH/USD", "EUR/USD"];
+        console.error("Error fetching assets:", err);
+        const fallbackAssets = ["EURUSD", "GBPUSD", "BTCUSD"];
         setAssets(fallbackAssets);
         setSelectedAsset(fallbackAssets[0]);
       });
@@ -94,11 +116,10 @@ export default function SignalDashboard() {
       const data = await response.json();
       setSignal(data);
       
-      // Add entry to running history log panel safely parsing text properties
       setHistory(prev => [
         {
-          time: new Date().toTimeString().split(' ')[0],
-          asset: typeof selectedAsset === 'object' ? selectedAsset.symbol : selectedAsset,
+          time: headerClock,
+          asset: selectedAsset,
           timeframe: timeframe,
           direction: data.direction || 'UNKNOWN',
           result: 'Pending'
@@ -115,7 +136,7 @@ export default function SignalDashboard() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500/30">
       {/* HEADER BAR */}
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
             <Activity className="h-5 w-5 text-slate-950 stroke-[2.5]" />
@@ -131,12 +152,37 @@ export default function SignalDashboard() {
           </div>
         </div>
 
-        {/* METRICS ROW */}
-        <div className="flex items-center gap-8 font-mono text-sm">
+        {/* METRICS ROW INCLUDING TIMEZONE AND 10S TIMER */}
+        <div className="flex items-center gap-4 font-mono text-sm flex-wrap">
+          {/* TIMEZONE SELECTOR */}
+          <div className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-inner text-xs">
+            <Globe className="h-3.5 w-3.5 text-slate-400" />
+            <select
+              value={selectedTimezone}
+              onChange={(e) => setSelectedTimezone(e.target.value)}
+              className="bg-transparent text-slate-300 font-bold outline-none cursor-pointer border-none"
+            >
+              {TIMEZONES.map((tz) => (
+                <option key={tz.value} value={tz.value} className="bg-slate-900 text-slate-200">{tz.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* DYNAMIC TIME CONTAINER */}
           <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
             <span className="text-slate-500 text-xs tracking-uppercase">Live Time</span>
             <span className="text-slate-200 font-bold tracking-wide">{headerClock || "00:00:00"}</span>
           </div>
+
+          {/* 10S CANDLE COUNTDOWN TIMER */}
+          <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
+            <span className="text-slate-500 text-xs tracking-uppercase">10s Timer</span>
+            <span className={`font-bold font-mono text-sm ${tenSecondTimer <= 3 ? 'text-rose-400 animate-ping' : 'text-emerald-400'}`}>
+              {String(tenSecondTimer).padStart(2, '0')}s
+            </span>
+          </div>
+
+          {/* STANDARD CANDLE TIMER */}
           <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
             <span className="text-slate-500 text-xs tracking-uppercase">Candle Close</span>
             <span className="text-amber-400 font-bold tracking-wide animate-pulse">{candleTimeLeft || "00:00"}</span>
@@ -146,8 +192,7 @@ export default function SignalDashboard() {
 
       {/* DASHBOARD CONTROL GRID */}
       <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* ACTION SELECTORS (LEFT PANEL) */}
+        {/* CONTROL SIDEBAR (LEFT) */}
         <section className="lg:col-span-1 bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col gap-6 shadow-xl relative overflow-hidden">
           <div>
             <h2 className="text-lg font-semibold tracking-tight mb-1 text-slate-200">Execution Controls</h2>
@@ -164,9 +209,8 @@ export default function SignalDashboard() {
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm font-medium text-slate-200 appearance-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all cursor-pointer"
               >
                 {assets.map((asset, index) => {
-                  // Guard rails against Error #31: string vs object check
                   const assetValue = typeof asset === 'object' && asset !== null ? asset.symbol : asset;
-                  const assetDisplay = typeof asset === 'object' && asset !== null ? `${asset.name} (${asset.symbol})` : asset;
+                  const assetDisplay = typeof asset === 'object' && asset !== null ? `${asset.name}` : asset;
                   return (
                     <option key={assetValue || index} value={assetValue}>{assetDisplay}</option>
                   );
@@ -216,15 +260,12 @@ export default function SignalDashboard() {
           </button>
         </section>
 
-        {/* MAIN RESULTS MONITOR (CENTER/RIGHT PANEL) */}
+        {/* MONITOR LAYOUT PANELS (RIGHT) */}
         <section className="lg:col-span-2 flex flex-col gap-6">
-          
-          {/* LOGIC INTERFACE SCREEN */}
+          {/* DISPLAY STATUS BOARD */}
           <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[340px] text-center shadow-xl relative overflow-hidden">
             {signal ? (
               <div className="w-full flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-200">
-                
-                {/* DYNAMIC DIRECTION BADGE */}
                 <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl border font-bold text-lg tracking-wide shadow-md ${
                   signal.direction === 'CALL' 
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-emerald-500/5' 
@@ -235,25 +276,23 @@ export default function SignalDashboard() {
                   ) : (
                     <TrendingDown className="h-6 w-6 stroke-[2.5] animate-bounce" />
                   )}
-                  {typeof signal.asset === 'object' ? signal.asset.symbol : signal.asset} — {signal.direction} EXECUTIVE ORDER
+                  {signal.asset} — {signal.direction} EXECUTIVE ORDER
                 </div>
 
-                {/* ALGORITHM DATA MATRIX */}
                 <div className="grid grid-cols-2 gap-4 w-full max-w-md mt-2 font-mono text-xs">
                   <div className="bg-slate-950/60 border border-slate-800 px-4 py-3 rounded-xl flex flex-col gap-1 text-left">
                     <span className="text-slate-500 uppercase tracking-wider font-sans">Confidence Level</span>
                     <span className="text-slate-200 font-bold text-sm">{signal.confidence}% Accuracy Rating</span>
                   </div>
                   <div className="bg-slate-950/60 border border-slate-800 px-4 py-3 rounded-xl flex flex-col gap-1 text-left">
-                    <span className="text-slate-500 uppercase tracking-wider font-sans">Execution Window</span>
-                    <span className="text-amber-400 font-bold text-sm">Open until {nextCandleTime || "00:00"}</span>
+                    <span className="text-slate-500 uppercase tracking-wider font-sans">Verification Matrix</span>
+                    <span className="text-amber-400 font-bold text-sm">Engine Clear</span>
                   </div>
                 </div>
 
-                {/* AI EXPLANATION FIELD */}
                 <div className="w-full max-w-md bg-slate-950 border border-slate-800/60 rounded-xl p-4 text-left shadow-inner">
                   <span className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest font-mono flex items-center gap-1.5 mb-2">
-                    <Layers className="h-3 w-3" /> Core Indicator Rationale
+                    <Layers className="h-3 w-3" /> Technical Analysis Indicators
                   </span>
                   <p className="text-xs text-slate-300 leading-relaxed font-sans">{signal.reasoning}</p>
                 </div>
@@ -266,25 +305,22 @@ export default function SignalDashboard() {
                 <div>
                   <h3 className="text-sm font-semibold text-slate-300 mb-1">Telemetry Monitor Clear</h3>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Select your operational trading pair asset on the sidebar control deck and prompt calculations to evaluate live indicators.
+                    Select your operational asset vector, adjust your timezone if needed, and run calculations to get live engine parameters.
                   </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* RUNNING SESSION LOGGER HISTORY PANEL */}
+          {/* HISTORICAL LOG TRACKER */}
           <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col gap-4 shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
               <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
                 <Clock className="h-4 w-4 text-slate-500" /> Recent Cloud Telemetry Sessions
               </h3>
-              <span className="text-[10px] font-mono text-slate-500 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded-md">
-                {history.length} SAVED REQUESTS
-              </span>
             </div>
 
-            <div className="overflow-x-auto max-h-[180px] overflow-y-auto custom-scrollbar">
+            <div className="overflow-x-auto max-h-[180px] overflow-y-auto">
               {history.length > 0 ? (
                 <table className="w-full text-left border-collapse font-mono text-xs">
                   <thead>
