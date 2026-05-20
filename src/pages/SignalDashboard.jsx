@@ -15,12 +15,11 @@ export default function SignalDashboard() {
   // Clocks & Timer States
   const [headerClock, setHeaderClock] = useState('');
   const [candleTimeLeft, setCandleTimeLeft] = useState('');
-  const [tenSecondTimer, setTenSecondTimer] = useState(10);
+  const [oneMinSecsLeft, setOneMinSecsLeft] = useState(60);
   const [selectedTimezone, setSelectedTimezone] = useState('Asia/Kolkata'); // Default to IST
 
   const BACKEND_URL = "https://qx-backend.onrender.com";
 
-  // Timezones array matching your original application options
   const TIMEZONES = [
     { value: 'Asia/Kolkata', label: 'IST (UTC+5:30)' },
     { value: 'UTC', label: 'UTC (Greenwich)' },
@@ -29,7 +28,7 @@ export default function SignalDashboard() {
     { value: 'Asia/Dubai', label: 'GST (Dubai)' }
   ];
 
-  // Global Sync Clocks & 10s Timer Loop
+  // Global Sync Clocks & Real-Time Candle Warning Loop
   useEffect(() => {
     const updateClocks = () => {
       const now = new Date();
@@ -48,7 +47,7 @@ export default function SignalDashboard() {
         setHeaderClock(now.toTimeString().split(' ')[0]);
       }
 
-      // 2. Standard Expiry Candlestick block countdown (5m frame)
+      // 2. Standard 5m Candle block countdown
       const secs = now.getSeconds();
       const mins = now.getMinutes();
       const remMins = 4 - (mins % 5);
@@ -56,25 +55,17 @@ export default function SignalDashboard() {
       setCandleTimeLeft(
         `${String(remMins).padStart(2, '0')}:${String(remSecs === 60 ? 0 : remSecs).padStart(2, '0')}`
       );
-    };
 
-    // 3. Independent 10s Candle Block Timer Loop
-    const tenSecondInterval = setInterval(() => {
-      setTenSecondTimer((prev) => {
-        if (prev <= 1) {
-          return 10; // Auto reset right at zero boundary
-        }
-        return prev - 1;
-      });
-    }, 1000);
+      // 3. Current 60-second candle remaining tracker
+      // If secs is 55, rem1MinSecs will be 5 seconds remaining.
+      const rem1MinSecs = 60 - secs;
+      setOneMinSecsLeft(rem1MinSecs === 60 ? 60 : rem1MinSecs);
+    };
 
     updateClocks();
     const clockInterval = setInterval(updateClocks, 1000);
 
-    return () => {
-      clearInterval(clockInterval);
-      clearInterval(tenSecondInterval);
-    };
+    return () => clearInterval(clockInterval);
   }, [selectedTimezone]);
 
   // Fetch Available Trading Pairs from Render Safely
@@ -152,7 +143,7 @@ export default function SignalDashboard() {
           </div>
         </div>
 
-        {/* METRICS ROW INCLUDING TIMEZONE AND 10S TIMER */}
+        {/* METRICS ROW */}
         <div className="flex items-center gap-4 font-mono text-sm flex-wrap">
           {/* TIMEZONE SELECTOR */}
           <div className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-inner text-xs">
@@ -168,23 +159,27 @@ export default function SignalDashboard() {
             </select>
           </div>
 
-          {/* DYNAMIC TIME CONTAINER */}
+          {/* DYNAMIC LIVE TIME */}
           <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
             <span className="text-slate-500 text-xs tracking-uppercase">Live Time</span>
             <span className="text-slate-200 font-bold tracking-wide">{headerClock || "00:00:00"}</span>
           </div>
 
-          {/* 10S CANDLE COUNTDOWN TIMER */}
+          {/* CURRENT 60S CANDLE COUNTDOWN REMAINING (TURNS RED AT 10S) */}
           <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
-            <span className="text-slate-500 text-xs tracking-uppercase">10s Timer</span>
-            <span className={`font-bold font-mono text-sm ${tenSecondTimer <= 3 ? 'text-rose-400 animate-ping' : 'text-emerald-400'}`}>
-              {String(tenSecondTimer).padStart(2, '0')}s
+            <span className="text-slate-500 text-xs tracking-uppercase">Candle Remaining</span>
+            <span className={`font-bold font-mono text-sm transition-all duration-300 ${
+              oneMinSecsLeft <= 10 
+                ? 'text-rose-500 animate-pulse font-extrabold shadow-sm shadow-rose-500/20' 
+                : 'text-emerald-400'
+            }`}>
+              {String(oneMinSecsLeft).padStart(2, '0')}s
             </span>
           </div>
 
-          {/* STANDARD CANDLE TIMER */}
+          {/* STANDARD 5M CANDLE COUNTDOWN */}
           <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl flex items-center gap-3 shadow-inner">
-            <span className="text-slate-500 text-xs tracking-uppercase">Candle Close</span>
+            <span className="text-slate-500 text-xs tracking-uppercase">5m Close</span>
             <span className="text-amber-400 font-bold tracking-wide animate-pulse">{candleTimeLeft || "00:00"}</span>
           </div>
         </div>
@@ -192,14 +187,14 @@ export default function SignalDashboard() {
 
       {/* DASHBOARD CONTROL GRID */}
       <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* CONTROL SIDEBAR (LEFT) */}
+        {/* SIDEBAR BLOCK */}
         <section className="lg:col-span-1 bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col gap-6 shadow-xl relative overflow-hidden">
           <div>
             <h2 className="text-lg font-semibold tracking-tight mb-1 text-slate-200">Execution Controls</h2>
             <p className="text-xs text-slate-400">Configure parameters for direct signal calculation routing.</p>
           </div>
 
-          {/* ASSET SELECTOR */}
+          {/* ASSET PAIR LIST SELECTOR */}
           <div className="flex flex-col gap-2 relative">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Target Asset Pair</label>
             <div className="relative">
@@ -220,7 +215,7 @@ export default function SignalDashboard() {
             </div>
           </div>
 
-          {/* TIMEFRAME SELECTOR */}
+          {/* TIMEFRAME SELECTION BLOCKS */}
           <div className="flex flex-col gap-2">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Analysis Expiry Period</label>
             <div className="grid grid-cols-3 gap-2">
@@ -240,7 +235,7 @@ export default function SignalDashboard() {
             </div>
           </div>
 
-          {/* EXECUTE ACTION BUTTON */}
+          {/* GENERATE BUTTON */}
           <button
             onClick={generateSignal}
             disabled={loading || !selectedAsset}
@@ -260,9 +255,8 @@ export default function SignalDashboard() {
           </button>
         </section>
 
-        {/* MONITOR LAYOUT PANELS (RIGHT) */}
+        {/* MONITOR WORKSPACE */}
         <section className="lg:col-span-2 flex flex-col gap-6">
-          {/* DISPLAY STATUS BOARD */}
           <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[340px] text-center shadow-xl relative overflow-hidden">
             {signal ? (
               <div className="w-full flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-200">
@@ -312,7 +306,7 @@ export default function SignalDashboard() {
             )}
           </div>
 
-          {/* HISTORICAL LOG TRACKER */}
+          {/* HISTORICAL RECENT REQUESTS */}
           <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col gap-4 shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
               <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
