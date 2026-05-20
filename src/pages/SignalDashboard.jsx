@@ -48,17 +48,31 @@ export default function SignalDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch Available Trading Pairs from Render
+  // Fetch Available Trading Pairs from Render safely
   useEffect(() => {
     fetch(`${BACKEND_URL}/api/assets`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("Server response not ok");
+        return res.json();
+      })
       .then((data) => {
-        if (data.assets && data.assets.length > 0) {
+        if (data && data.assets && Array.isArray(data.assets) && data.assets.length > 0) {
           setAssets(data.assets);
-          setSelectedAsset(data.assets[0]); // Default to first pair
+          setSelectedAsset(data.assets[0]); // Default safely
+        } else {
+          // Fallback array list so the app NEVER crashes even if the backend is waking up
+          const fallbackAssets = ["BTC/USD", "ETH/USD", "EUR/USD"];
+          setAssets(fallbackAssets);
+          setSelectedAsset(fallbackAssets[0]);
         }
       })
-      .catch((err) => console.error("Error fetching assets from cloud backend:", err));
+      .catch((err) => {
+        console.error("Error fetching assets from cloud backend:", err);
+        // Fallback safety matrix trigger
+        const fallbackAssets = ["BTC/USD", "ETH/USD", "EUR/USD"];
+        setAssets(fallbackAssets);
+        setSelectedAsset(fallbackAssets[0]);
+      });
   }, []);
 
   // Generate Trading Signal Function
